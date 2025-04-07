@@ -1,0 +1,199 @@
+# Data Exploration #########################################################
+# Data Loading 
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# Read the data
+train = pd.read_csv("data/train.csv")
+test = pd.read_csv("data/test.csv")
+train.head()
+test.head()
+
+# Initial Data Exploration
+train.info()
+test.info()
+
+# Checking for duplicate rows
+print("Number of duplicate rows in train set:", train.duplicated().sum())
+print("Number of duplicate rows in test set:", train.duplicated().sum())
+
+train.describe().T
+
+# Exploratory Data Analysis (EDA)
+Q1: What percentage of machines fail, and what percentage don’t?
+target_dist = train['Machine failure'].value_counts()
+
+plt.figure(figsize=(6, 4))
+plt.bar(target_dist.index, target_dist.values, color=['green', 'red'], width=0.5)
+plt.title('Distribution of Machine Failure (Target Variable)')
+plt.xlabel('Machine Failure')
+plt.ylabel('Count')
+plt.xticks(ticks=[0, 1], labels=['No Failure (0)', 'Failure (1)'])
+plt.show()
+
+Q2: How do different machine types compare in terms of failure rates?
+failure_rate_by_type = train.groupby("Type")["Machine failure"].mean()
+failure_rate_by_type = pd.DataFrame(failure_rate_by_type).reset_index().sort_values('Machine failure')
+percentages = failure_rate_by_type['Machine failure'] * 100
+
+plt.figure(figsize=(10, 4))
+bars = plt.barh(failure_rate_by_type['Type'], percentages, color=['#1D24CA', 'green', '#B8001F'], height=0.6)
+plt.title("Failure Rate by Machine Type (Percentage)")
+plt.xlabel("Failure Rate (%)")
+plt.ylabel("Machine Type")
+
+# Add labels
+for bar, percentage in zip(bars, percentages):
+    label = plt.text(bar.get_width()-0.125, bar.get_y() + bar.get_height()/2, f'{percentage:.2f}%', va='center')
+    label.set_color('#ffffff')
+    label.set_fontweight(weight='bold')
+
+plt.show()
+
+Q3: Distribution of Numerical features
+numerical_cols = ['Air temperature [K]', 'Process temperature [K]', 'Rotational speed [rpm]', 'Torque [Nm]', 'Tool wear [min]']
+
+plt.figure(figsize=(15, 10))
+for i, feature in enumerate(numerical_cols, 1):
+    plt.subplot(int(len(numerical_cols)/2)+1, 2, i)
+    sns.histplot(train[feature], kde=True, color='blue')
+    plt.title(feature)
+plt.tight_layout()
+plt.show()
+
+Q4: Checking of Outliers
+plt.figure(figsize=(12, 8))
+for i, feature in enumerate(numerical_cols, 1):
+    plt.subplot(int(len(numerical_cols)/2)+1, 2, i)
+    sns.boxplot(x=train[feature], color='orange')
+    plt.title(f'Box plot for {feature}')
+plt.tight_layout()
+plt.show()
+
+# Handling the outliers using IQR
+def detect_outlier_IQR(data, features):
+
+    outlier_idxs = set()
+
+    for feature in features:
+        q1 = train[feature].quantile(0.25)
+        q3 = train[feature].quantile(0.75)
+        IQR = q3 - q1
+        lower_bound = q1 - 1.5 * IQR
+        upper_bound = q3 + 1.5 * IQR
+        
+        idx = data[(data[feature]<lower_bound) | (data[feature]>upper_bound)].index
+        outlier_idxs.update(idx)
+    
+    return outlier_idxs
+
+outlier_cols = ['Rotational speed [rpm]', 'Torque [Nm]']
+
+outlier_idx = detect_outlier_IQR(train, outlier_cols)
+print(f"Outliers detected: {len(outlier_idx)}")
+
+# Remove outliers
+train_no_outliers = train.drop(index=outlier_idx)
+print(f"Train data shape before removing outliers: {train.shape}")
+print(f"Train data shape after removing outliers: {train_no_outliers.shape}")
+
+plt.figure(figsize=(12, 8))
+for i, feature in enumerate(numerical_cols, 1):
+    plt.subplot(int(len(numerical_cols)/2)+1, 2, i)
+    sns.boxplot(x=train_no_outliers[feature], color='orange')
+    plt.title(f'Box plot for {feature}')
+plt.tight_layout()
+plt.show()
+
+Q5: Which features are most correlated with the target variable?
+# Calculate correlation matrix
+num_cols = train_no_outliers.select_dtypes(include=['int64', 'float64'])
+correlation_matrix =num_cols.corr()
+
+# Analyze correlation with 'Machine failure'
+correlation_with_target = correlation_matrix['Machine failure'].sort_values(ascending=False)
+print(correlation_with_target)
+
+Q6: Checking for NULL values
+train_nc = train_no_outliers.isna().sum()
+test_nc = test.isna().sum()
+
+print(f"NULL count in train data: {len(train_nc[train_nc>0])}")
+print(f"NULL count in test data: {len(test_nc[test_nc>0])}")
+
+# Future Engineering and Preprocessing #########################################################
+# Dropping the unnecessary columns
+train_df = train_no_outliers.drop(columns=['id', 'Product ID'], errors='ignore')
+test_df = test.drop(columns=['id', 'Product ID'], errors='ignore')
+print(train_df.columns)
+print(test_df.columns)
+
+# Encoding the Type column
+train_df['Type'] = train_df['Type'].map({'L': 0, 'M': 1, 'H': 3})
+train_df
+
+# Feature Scaling
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+
+scaling_cols = numerical_cols
+
+train_df[scaling_cols] = scaler.fit_transform(train_df[scaling_cols])
+train_df.head()
+
+# Train-test split
+from sklearn.model_selection import train_test_split
+
+X = train_df.drop(columns='Machine failure')
+y = train_df['Machine failure']
+
+print(f"Actual Response: {y.shape}")
+
+X_train, X_val, y_train, y_val = train_test_split(X, y, train_size=0.8, random_state=99, stratify=y)
+
+print("Training set size:", X_train.shape)
+print("Validation set size:", X_val.shape)
+print("Test set size:", test_df.shape)
+
+# Machine Learning models for Classification #########################################################
+# Baseline model (Logistic Regression)
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import roc_auc_score, accuracy_score, confusion_matrix
+
+# Initialize and train the model
+logistic_clf = LogisticRegression(random_state=99, max_iter=1000)
+logistic_clf.fit(X_train, y_train)
+
+# Evaluate the model on Training set
+y_pred_train_logistic = logistic_clf.predict(X_train)
+y_prob_train_logistic = logistic_clf.predict_proba(X_train)[:, 1]
+
+# Evaluate the model on Validation set
+y_pred_val_logistic = logistic_clf.predict(X_val)
+y_prob_val_logistic = logistic_clf.predict_proba(X_val)[:, 1]
+
+print(f"Training Data ROC-AUC score: {roc_auc_score(y_train, y_prob_train_logistic):.6f}")
+print(f"Validation Data ROC-AUC score: {roc_auc_score(y_val, y_prob_val_logistic):.6f}")
+print(f"Accuracy on training set: {accuracy_score(y_train, y_pred_train_logistic):.6f}")
+print(f"Accuracy on validation set: {accuracy_score(y_val, y_pred_val_logistic):.6f}")
+
+logistic_train_cm = confusion_matrix(y_train, y_pred_train_logistic, labels=logistic_clf.classes_)
+logistic_val_cm = confusion_matrix(y_val, y_pred_val_logistic, labels=logistic_clf.classes_)
+
+plt.figure(figsize=(12, 5))
+plt.subplot(1,2,1)
+sns.heatmap(logistic_train_cm, annot=True, fmt='d', cmap='Blues')
+plt.title("Confusion matrix on training data")
+plt.xlabel("Predicted label")
+plt.ylabel("True label")
+
+plt.subplot(1,2,2)
+sns.heatmap(logistic_val_cm, annot=True, fmt='d', cmap='Blues')
+plt.title("Confusion matrix on validation data")
+plt.xlabel("Predicted label")
+plt.ylabel("True label")
+
+plt.tight_layout()
+plt.show()
